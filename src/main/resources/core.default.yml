@@ -1,0 +1,51 @@
+# ============================================
+#  MineAlphaProxy - main configuration
+#  Format: YAML
+# ============================================
+
+# Proxy brand.
+# Allowed values: Fed43Proxy, MineAlphaProxy
+proxy-name: "MineAlphaProxy"
+
+# Language code. Files are located in lang/<code>.yml (en, ru).
+language: "en"
+
+bind:
+  host: "0.0.0.0"
+  port: 25577
+  motd: "§a%proxy_name% §7| §eWelcome!"
+  max-players: 500
+  online-mode: true
+
+# Player info forwarding mode:
+#   none   - do not forward anything
+#   legacy - BungeeCord-compatible (ip_forward)
+#   modern - Velocity modern forwarding (secret auto-generated if missing)
+forwarding:
+  mode: "modern"
+  secret-file: "forwarding.secret"
+
+servers:
+  list:
+    lobby: "127.0.0.1:25566"
+    survival: "127.0.0.1:25567"
+  try-order:
+    - lobby
+    - survival
+
+default-server: "lobby"
+
+advanced:
+  compression-threshold: 256
+  compression-level: 6
+  read-timeout: 30000
+  proxy-protocol: false
+  login-ratelimit: 3000
+
+query:
+  enabled: false
+  port: 25577
+
+plugins:
+  velocity-dir: "VelocityPlugins"
+  bungee-dir: "BungeePlugins"

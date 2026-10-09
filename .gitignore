@@ -1,0 +1,34 @@
+# Build artifacts
+build/
+.gradle/
+
+# Secrets and local configs
+forwarding.secret
+core.yml
+velocity.toml
+config.yml
+
+# Runtime folders
+lang/
+MineAlphaPlugins/
+VelocityPlugins/
+BungeePlugins/
+_disabled/
+logs/
+*.log
+
+# External binaries
+libs/
+src/main/resources/viaproxy/ViaProxy.bin
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+*.class
+*.jar

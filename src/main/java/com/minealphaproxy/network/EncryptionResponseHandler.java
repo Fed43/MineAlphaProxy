@@ -1,0 +1,115 @@
+package com.minealphaproxy.network;
+
+import com.minealphaproxy.compat.velocity.VelocityProxyServer;
+import com.minealphaproxy.config.ProxyConfig;
+import com.minealphaproxy.event.EventBus;
+import com.minealphaproxy.util.Logger;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+
+import java.util.Arrays;
+
+public final class EncryptionResponseHandler extends SimpleChannelInboundHandler<ByteBuf> {
+
+    private final ProxyConfig config;
+    private final Logger logger;
+    private final EventBus eventBus;
+    private final VelocityProxyServer velocityProxyServer;
+
+    public EncryptionResponseHandler(ProxyConfig config, Logger logger,
+                                     EventBus eventBus,
+                                     VelocityProxyServer velocityProxyServer) {
+        this.config = config;
+        this.logger = logger;
+        this.eventBus = eventBus;
+        this.velocityProxyServer = velocityProxyServer;
+    }
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, ByteBuf buf) {
+        int packetId = VarInts.readVarInt(buf);
+        if (packetId != 0x01) { ctx.close(); return; }
+
+        int secretLen = VarInts.readVarInt(buf);
+        byte[] encryptedSecret = new byte[secretLen];
+        buf.readBytes(encryptedSecret);
+
+        int tokenLen = VarInts.readVarInt(buf);
+        byte[] encryptedToken = new byte[tokenLen];
+        buf.readBytes(encryptedToken);
+
+        byte[] sharedSecret;
+        byte[] verifyToken;
+        try {
+            sharedSecret = EncryptionUtil.rsaDecrypt(encryptedSecret);
+            verifyToken = EncryptionUtil.rsaDecrypt(encryptedToken);
+        } catch (Exception e) {
+            logger.warn("Failed to decrypt: {}", e.getMessage());
+            ctx.close();
+            return;
+        }
+
+        byte[] expectedToken = ctx.channel().attr(LoginStartHandler.VERIFY_TOKEN).get();
+        if (expectedToken == null || !Arrays.equals(expectedToken, verifyToken)) {
+            logger.warn("Verify token mismatch");
+            ctx.close();
+            return;
+        }
+
+        try {
+            ctx.pipeline().addFirst("aes", new AesCodec(sharedSecret));
+        } catch (Exception e) {
+            logger.error("Failed to enable AES", e);
+            ctx.close();
+            return;
+        }
+
+        String username = ctx.channel().attr(LoginStartHandler.USERNAME).get();
+
+        String hash;
+        try {
+            hash = EncryptionUtil.serverHash(sharedSecret);
+        } catch (Exception e) {
+            logger.error("Failed to compute server hash", e);
+            ctx.close();
+            return;
+        }
+
+        logger.info("Authenticating {} with Mojang...", username);
+
+        SessionService.hasJoined(username, hash).whenComplete((profile, error) -> {
+            ctx.channel().eventLoop().execute(() -> {
+                if (error != null || profile == null) {
+                    logger.warn("Session verification failed for {}: {}",
+                            username,
+                            error != null ? error.getMessage() : "not joined");
+                    disconnect(ctx, "§cFailed to verify session with Mojang.");
+                    return;
+                }
+
+                logger.info("Mojang profile: {} ({})", profile.name(), profile.uuid());
+
+                BackendLoginFlow.connect(ctx, config, logger,
+                        profile.name(), profile.uuid(), profile.properties(),
+                        eventBus, velocityProxyServer);
+            });
+        });
+    }
+
+    private void disconnect(ChannelHandlerContext ctx, String message) {
+        try {
+            String json = "{\"text\":\"" + message.replace("\"", "\\\"") + "\"}";
+            ByteBuf out = ctx.alloc().buffer();
+            VarInts.writeVarInt(out, 0x00);
+            VarInts.writeString(out, json);
+            ctx.writeAndFlush(out).addListener(f -> ctx.close());
+        } catch (Exception e) { ctx.close(); }
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        logger.debug("Encryption handler error: {}", cause.getMessage());
+        ctx.close();
+    }
+}
